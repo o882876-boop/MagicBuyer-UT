@@ -1,0 +1,61 @@
+name: Build FC27 fixed userscript
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-fc27-fixed.yml'
+      - 'app/**'
+      - 'tampermonkey-header.js'
+      - 'webpack.config.js'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Patch FC27 ignore-list compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/utils/searchUtil.js')
+          s = p.read_text()
+          old = '''    const playersList = new Set(\n      (buyerSetting["idAddIgnorePlayersList"] || []).map(({ id }) => id)\n    );'''
+          new = '''    const rawIgnorePlayers = buyerSetting["idAddIgnorePlayersList"];\n    let normalizedIgnorePlayers = [];\n    if (Array.isArray(rawIgnorePlayers)) {\n      normalizedIgnorePlayers = rawIgnorePlayers;\n    } else if (rawIgnorePlayers instanceof Set) {\n      normalizedIgnorePlayers = Array.from(rawIgnorePlayers);\n    } else if (rawIgnorePlayers instanceof Map) {\n      normalizedIgnorePlayers = Array.from(rawIgnorePlayers.values());\n    } else if (typeof rawIgnorePlayers === "string") {\n      try {\n        const parsed = JSON.parse(rawIgnorePlayers);\n        normalizedIgnorePlayers = Array.isArray(parsed) ? parsed : [];\n      } catch (e) {\n        normalizedIgnorePlayers = [];\n      }\n    } else if (rawIgnorePlayers && typeof rawIgnorePlayers === "object") {\n      normalizedIgnorePlayers = Object.values(rawIgnorePlayers);\n    }\n    const playersList = new Set(\n      normalizedIgnorePlayers\n        .map((item) => (item && typeof item === "object" ? item.id : item))\n        .filter(Boolean)\n    );'''
+          if old not in s:
+              raise SystemExit('Expected ignore-list block not found')
+          p.write_text(s.replace(old, new))
+          PY
+      - name: Build userscript
+        run: npm run build:prod
+      - name: Create standalone fixed script
+        run: |
+          cp dist/fut-auto-buyer.user.js MagicBuyer-FC27-Fixed.user.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('MagicBuyer-FC27-Fixed.user.js')
+          s = p.read_text()
+          s = s.replace('// @name        MagicBuyer-UT', '// @name        MagicBuyer FC27 Fixed')
+          s = s.replace('// @version     4.0.0', '// @version     4.0.0-fc27fix2')
+          s = s.replace('https://github.com/AMINE1921/MagicBuyer-UT/releases/latest/download/fut-auto-buyer.user.js', 'https://raw.githubusercontent.com/o882876-boop/MagicBuyer-UT/master/MagicBuyer-FC27-Fixed.user.js')
+          p.write_text(s)
+          PY
+      - name: Commit built fixed script
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add MagicBuyer-FC27-Fixed.user.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Build FC27 fixed userscript'
+          git push

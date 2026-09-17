@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc7
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 搜尋總評同步
+// @version      4.0.0-fc27fix-tc8
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 安全同步搜尋總評
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC7] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC8] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -88,39 +88,82 @@
     }, 50);
   };
 
+  const findInputNearText = (labels) => {
+    try {
+      const nodes = [...document.querySelectorAll('label,span,div,p,small')];
+      for (const node of nodes) {
+        const txt = (node.textContent || '').trim().replace(/\s+/g, ' ');
+        if (!labels.some(l => txt === l || txt.startsWith(l + ':') || txt.includes(l))) continue;
+        let cur = node;
+        for (let i = 0; i < 5 && cur; i++, cur = cur.parentElement) {
+          const inputs = cur.querySelectorAll && cur.querySelectorAll('input');
+          if (inputs && inputs.length) return inputs[0];
+        }
+      }
+    } catch (_) {}
+    return null;
+  };
+
+  const syncOverallInputs = () => {
+    try {
+      const srcMin = findInputNearText(['最低總評','Minimum Overall','Min Overall']);
+      const srcMax = findInputNearText(['最高總評','Maximum Overall','Max Overall']);
+      const dstMin = findInputNearText(['最低評分','Note min','Note minimale du joueur']);
+      const dstMax = findInputNearText(['最高評分','Note max','Note maximale du joueur']);
+
+      const copy = (src, dst) => {
+        if (!src || !dst) return;
+        const v = parseInt(src.value, 10);
+        if (!Number.isFinite(v) || v <= 0) return;
+        if (String(dst.value) === String(v)) return;
+        dst.value = String(v);
+        dst.dispatchEvent(new Event('input', { bubbles: true }));
+        dst.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      copy(srcMin, dstMin);
+      copy(srcMax, dstMax);
+    } catch (e) {
+      console.warn('[MagicBuyer TC8] 評分同步失敗', e);
+    }
+  };
+
   const startTranslator = () => {
     if (!document.documentElement) return setTimeout(startTranslator, 100);
-    const obs = new MutationObserver(translatePage);
+    const obs = new MutationObserver(() => {
+      translatePage();
+      setTimeout(syncOverallInputs, 80);
+    });
     obs.observe(document.documentElement, { childList:true, subtree:true, characterData:true });
+    document.addEventListener('input', (ev) => {
+      const el = ev.target;
+      if (!(el instanceof HTMLInputElement)) return;
+      setTimeout(syncOverallInputs, 0);
+    }, true);
     translatePage();
-    setInterval(translatePage, 1200);
+    setTimeout(syncOverallInputs, 300);
+    setInterval(syncOverallInputs, 1200);
   };
 
   const patchCode = (source) => {
     let code = source;
 
-    // FC27: ignore-list can be object/Set/Map instead of Array.
     const oldIgnore = 'const h=new Set((e.idAddIgnorePlayersList||[]).map((({id:e})=>e)))';
     const newIgnore = 'const h=new Set((()=>{const t=e.idAddIgnorePlayersList;if(!t)return[];if(Array.isArray(t))return t;if(t instanceof Set)return[...t];if(t instanceof Map)return[...t.values()];if("string"==typeof t)try{const e=JSON.parse(t);return Array.isArray(e)?e:[]}catch(e){return[]}return"object"==typeof t?Object.values(t):[]})().map((e=>"object"==typeof e&&e?e.id:e)).filter(Boolean))';
     if (code.includes(oldIgnore)) code = code.replace(oldIgnore, newIgnore);
 
-    // FC27: Start must survive EA criteria sync errors.
     const syncNeedle = 'const i=P();return(0,a.sO)("BuyerSettings",t),(0,a.sO)("CommonSettings",n),{buyer:t,common:n,criteria:i}';
     const syncReplacement = 'let i;try{i=P()}catch(e){console.warn("[MagicBuyer FC27] criteria sync failed",e),i=(0,a.NA)("lastSearchCriteria")||{type:"player",defId:[]}}return(0,a.sO)("BuyerSettings",t),(0,a.sO)("CommonSettings",n),{buyer:t,common:n,criteria:i}';
     if (code.includes(syncNeedle)) code = code.replace(syncNeedle, syncReplacement);
 
-    // FC27: derive player rating from several possible fields/methods, not just l.rating.
     const oldRatingRead = 'b=parseInt(l.rating);';
     const newRatingRead = 'b=(()=>{let e=NaN;try{e=parseInt(l&&l.rating,10)}catch(t){}if(!Number.isFinite(e))try{e=parseInt(l&&"function"==typeof l.getRating?l.getRating():NaN,10)}catch(t){}if(!Number.isFinite(e))try{const t=l&&l._staticData||{};e=parseInt(t.rating||t.overallRating||t.overall||t.ovr||NaN,10)}catch(t){}return e})();';
     if (code.includes(oldRatingRead)) code = code.replace(oldRatingRead, newRatingRead);
 
-    // TC7: read the visible FC27 Search-page Overall Rating inputs.
-    // If Search says 75, the actual autobuyer minimum becomes 75; 76 becomes 76, etc.
     const priceVarsNeedle = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);';
-    const priceVarsReplacement = 'const __mbNearestInput=(names)=>{try{const els=[...document.querySelectorAll("label,span,div,p,small")].filter(x=>{const z=(x.textContent||"").trim().replace(/\\s+/g," ");return names.some(n=>z===n||z.startsWith(n+":"))});const inputs=[...document.querySelectorAll("input")].filter(x=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0});let best=null,dist=1/0;for(const el of els){const a=el.getBoundingClientRect();for(const inp of inputs){const b=inp.getBoundingClientRect(),d=Math.abs((a.left+a.right)/2-(b.left+b.right)/2)+2*Math.abs(a.bottom-b.top);if(b.top+5>=a.top&&d<dist){const v=parseInt(String(inp.value||"").replace(/[^\\d-]/g,""),10);if(Number.isFinite(v)&&v>0){best=v;dist=d}}}}return best}catch(t){return null}};const __mbSearchMin=__mbNearestInput(["最低總評","Minimum Overall","Min Overall","Note globale min","Note min globale"]),__mbSearchMax=__mbNearestInput(["最高總評","Maximum Overall","Max Overall","Note globale max","Note max globale"]);if(Number.isFinite(__mbSearchMin))e.idAbMinRating=__mbSearchMin;if(Number.isFinite(__mbSearchMax))e.idAbMaxRating=__mbSearchMax;let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbSearchMin)?"（已同步搜尋頁）":""}`,i.idProgressAutobuyer);';
+    const priceVarsReplacement = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
-    // Hard-filter ratings and print the reason when a card is skipped.
     const ratingCheckNeedle = 'const R=!(D||M)||(0,P.l)(b,D,M),F=O(`${L}(${b}) Prix: ${y} temps: ${p}`);';
     const ratingCheckReplacement = 'const R=Number.isFinite(b)&&(!(D||M)||(0,P.l)(b,D,M)),F=O(`${L}(${Number.isFinite(b)?b:"?"}) Prix: ${y} temps: ${p}`);';
     if (code.includes(ratingCheckNeedle)) code = code.replace(ratingCheckNeedle, ratingCheckReplacement);
@@ -136,7 +179,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc7');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc8');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc1
+// @version      4.0.0-fc27fix-tc2
 // @description  MagicBuyer FC27 相容修正 + 繁體中文介面
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
@@ -94,22 +94,18 @@
   };
 
   const patchCode = (code) => {
-    // FC27 compatibility: idAddIgnorePlayersList may no longer be an Array.
     const oldExact = 'const h=new Set((e.idAddIgnorePlayersList||[]).map((({id:e})=>e)))';
     const replacement = 'const h=new Set((()=>{const t=e.idAddIgnorePlayersList;if(!t)return[];if(Array.isArray(t))return t;if(t instanceof Set)return[...t];if(t instanceof Map)return[...t.values()];if("string"==typeof t)try{const e=JSON.parse(t);return Array.isArray(e)?e:[]}catch(e){return[]}return"object"==typeof t?Object.values(t):[]})().map((e=>"object"==typeof e&&e?e.id:e)).filter(Boolean))';
     if (code.includes(oldExact)) return code.replace(oldExact, replacement);
-
-    // Fallback for builds with slightly different minification.
-    return code.replace(/const h=new Set\(\(e\.idAddIgnorePlayersList\|\|\[\]\)\.map\(\(\(\{id:e\}\)=>e\)\)\)/,
-      replacement);
+    return code.replace(/const h=new Set\(\(e\.idAddIgnorePlayersList\|\|\[\]\)\.map\(\(\(\{id:e\}\)=>e\)\)\)/, replacement);
   };
 
   const run = (source) => {
     try {
       const patched = patchCode(source);
-      // Indirect eval keeps the original bundled script behavior while using this userscript's grants.
-      (0, eval)(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版');
+      // IMPORTANT: direct eval keeps Tampermonkey's GM_* grants/unsafeWindow in scope.
+      eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc2');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc2
+// @version      4.0.0-fc27fix-tc3
 // @description  MagicBuyer FC27 相容修正 + 繁體中文介面
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
@@ -32,13 +32,15 @@
     ['RUNNING', '運行中'], ['PAUSED', '已暫停'], ['IDLE', '待機'],
     ['Autobuyer Started', '自動買家已開始'], ['Autobuyer Stopped', '自動買家已停止'], ['Autobuyer Paused', '自動買家已暫停'],
     ['Démarrer', '開始'], ['Arrêter', '停止'], ['Reprendre', '繼續'], ['Pause', '暫停'],
-    ['Recherche', '搜尋'], ['Requêtes', '搜尋次數'], ['Acheter', '買入'], ['Vendre', '出售'], ['Enchère', '出價'],
+    ['Recherche', '搜尋'], ['Requêtes', '搜尋次數'], ['Acheter', '買入'], ['Achat', '買入'], ['Vendre', '出售'], ['Vente', '出售'], ['Enchère', '出價'],
     ['Filtres', '篩選'], ['Filtre', '篩選'], ['Paramètres', '設定'], ['Prix', '價格'], ['Joueur', '球員'], ['Joueurs', '球員'],
     ['Nom', '名稱'], ['Rareté', '稀有度'], ['Poste', '位置'], ['Styles de jeu', 'PlayStyle'], ['Pays / région', '國家／地區'],
     ['Championnat', '聯賽'], ['Club', '球會'], ['Tous', '全部'], ['Toutes', '全部'], ['Argent', '銀卡'], ['Or', '金卡'], ['Spéciale', '特殊卡'],
     ['Prix min.', '最低出價'], ['Prix max.', '最高出價'], ['Min. achat imm.', '最低立即購買'], ['Max. achat imm.', '最高立即購買'],
     ['Journal', '運行記錄'], ['Statistiques', '統計'], ['Gagnés', '買入成功'], ['Vendus', '已售出'], ['Invendus', '未售出'],
-    ['Disponible', '可用'], ['Disponibles', '可用'], ['Transferts actifs', '放售中'], ['Bénéfice', '利潤'], ['Coins', '金幣'],
+    ['Dispo', '可用'], ['Disponible', '可用'], ['Disponibles', '可用'], ['Actifs', '放售中'], ['Transferts actifs', '放售中'], ['Bénéfice', '利潤'], ['Profit', '利潤'], ['Coins', '金幣'],
+    ['État', '狀態'], ['Temps', '時間'], ['Sécurité', '安全'], ['Marché', '市場'], ['Plus', '更多'], ['Vider les logs', '清除記錄'],
+    ['Aucune recherche capturée — cherche un joueur dans Cible, ou lance une recherche sur le marché.', '未捕捉到搜尋條件 — 請選擇球員或先在市場搜尋。'],
     ['Bot démarré — recherche en cours', '自動買家已開始 — 正在搜尋'], ['Reprise du bot', '自動買家已繼續'],
     ['Recherche marché', '市場搜尋'], ['Transfer Market Search', '轉會市場搜尋'], ['Transfer Market Results - List View', '轉會市場結果'],
     ['Aucun élément', '沒有搜尋結果'], ['carte(s)', '張卡'], ['Joueur ignoré', '已忽略此球員'], ['Cached Item', '已處理此物品'],
@@ -93,19 +95,35 @@
     setInterval(translatePage, 2000);
   };
 
-  const patchCode = (code) => {
+  const patchCode = (source) => {
+    let code = source;
+
+    // FC27: ignore-list is not always an Array anymore.
     const oldExact = 'const h=new Set((e.idAddIgnorePlayersList||[]).map((({id:e})=>e)))';
     const replacement = 'const h=new Set((()=>{const t=e.idAddIgnorePlayersList;if(!t)return[];if(Array.isArray(t))return t;if(t instanceof Set)return[...t];if(t instanceof Map)return[...t.values()];if("string"==typeof t)try{const e=JSON.parse(t);return Array.isArray(e)?e:[]}catch(e){return[]}return"object"==typeof t?Object.values(t):[]})().map((e=>"object"==typeof e&&e?e.id:e)).filter(Boolean))';
-    if (code.includes(oldExact)) return code.replace(oldExact, replacement);
-    return code.replace(/const h=new Set\(\(e\.idAddIgnorePlayersList\|\|\[\]\)\.map\(\(\(\{id:e\}\)=>e\)\)\)/, replacement);
+    if (code.includes(oldExact)) {
+      code = code.replace(oldExact, replacement);
+    } else {
+      code = code.replace(/const h=new Set\(\(e\.idAddIgnorePlayersList\|\|\[\]\)\.map\(\(\(\{id:e\}\)=>e\)\)\)/, replacement);
+    }
+
+    // FC27: the EA-native search controller can throw while syncing criteria.
+    // In that case Start used to die before startAutoBuyer() was even called.
+    const syncNeedle = 'const i=P();return(0,a.sO)("BuyerSettings",t),(0,a.sO)("CommonSettings",n),{buyer:t,common:n,criteria:i}';
+    const syncReplacement = 'let i;try{i=P()}catch(e){console.warn("[MagicBuyer FC27] criteria sync failed",e),i=(0,a.NA)("lastSearchCriteria")||{type:"player",defId:[]}}return(0,a.sO)("BuyerSettings",t),(0,a.sO)("CommonSettings",n),{buyer:t,common:n,criteria:i}';
+    if (code.includes(syncNeedle)) {
+      code = code.replace(syncNeedle, syncReplacement);
+    }
+
+    return code;
   };
 
   const run = (source) => {
     try {
       const patched = patchCode(source);
-      // IMPORTANT: direct eval keeps Tampermonkey's GM_* grants/unsafeWindow in scope.
+      // Direct eval keeps Tampermonkey grants and unsafeWindow in scope.
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc2');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc3');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

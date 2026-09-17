@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc6
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 評分過濾診斷
+// @version      4.0.0-fc27fix-tc7
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 搜尋總評同步
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC6] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC7] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -114,9 +114,10 @@
     const newRatingRead = 'b=(()=>{let e=NaN;try{e=parseInt(l&&l.rating,10)}catch(t){}if(!Number.isFinite(e))try{e=parseInt(l&&"function"==typeof l.getRating?l.getRating():NaN,10)}catch(t){}if(!Number.isFinite(e))try{const t=l&&l._staticData||{};e=parseInt(t.rating||t.overallRating||t.overall||t.ovr||NaN,10)}catch(t){}return e})();';
     if (code.includes(oldRatingRead)) code = code.replace(oldRatingRead, newRatingRead);
 
-    // Show the actual min/max settings on every search so we can verify whether 75 is really stored.
+    // TC7: read the visible FC27 Search-page Overall Rating inputs.
+    // If Search says 75, the actual autobuyer minimum becomes 75; 76 becomes 76, etc.
     const priceVarsNeedle = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);';
-    const priceVarsReplacement = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}`,i.idProgressAutobuyer);';
+    const priceVarsReplacement = 'const __mbNearestInput=(names)=>{try{const els=[...document.querySelectorAll("label,span,div,p,small")].filter(x=>{const z=(x.textContent||"").trim().replace(/\\s+/g," ");return names.some(n=>z===n||z.startsWith(n+":"))});const inputs=[...document.querySelectorAll("input")].filter(x=>{const r=x.getBoundingClientRect();return r.width>0&&r.height>0});let best=null,dist=1/0;for(const el of els){const a=el.getBoundingClientRect();for(const inp of inputs){const b=inp.getBoundingClientRect(),d=Math.abs((a.left+a.right)/2-(b.left+b.right)/2)+2*Math.abs(a.bottom-b.top);if(b.top+5>=a.top&&d<dist){const v=parseInt(String(inp.value||"").replace(/[^\\d-]/g,""),10);if(Number.isFinite(v)&&v>0){best=v;dist=d}}}}return best}catch(t){return null}};const __mbSearchMin=__mbNearestInput(["最低總評","Minimum Overall","Min Overall","Note globale min","Note min globale"]),__mbSearchMax=__mbNearestInput(["最高總評","Maximum Overall","Max Overall","Note globale max","Note max globale"]);if(Number.isFinite(__mbSearchMin))e.idAbMinRating=__mbSearchMin;if(Number.isFinite(__mbSearchMax))e.idAbMaxRating=__mbSearchMax;let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbSearchMin)?"（已同步搜尋頁）":""}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
     // Hard-filter ratings and print the reason when a card is skipped.
@@ -135,7 +136,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc6');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc7');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc8
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 安全同步搜尋總評
+// @version      4.0.0-fc27fix-tc9
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 搜尋總評直接同步
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC8] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC9] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -88,43 +88,51 @@
     }, 50);
   };
 
-  const findInputNearText = (labels) => {
+  const visibleInputs = () => [...document.querySelectorAll('input')].filter((el) => {
     try {
-      const nodes = [...document.querySelectorAll('label,span,div,p,small')];
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden';
+    } catch (_) { return false; }
+  });
+
+  const nearestInputToText = (labels) => {
+    try {
+      const nodes = [...document.querySelectorAll('label,span,div,p,small')].filter((el) => {
+        const txt = (el.textContent || '').trim().replace(/\s+/g, ' ');
+        return labels.some((label) => txt === label || txt.startsWith(label + ':'));
+      });
+      const inputs = visibleInputs();
+      let best = null;
+      let bestScore = Infinity;
       for (const node of nodes) {
-        const txt = (node.textContent || '').trim().replace(/\s+/g, ' ');
-        if (!labels.some(l => txt === l || txt.startsWith(l + ':') || txt.includes(l))) continue;
-        let cur = node;
-        for (let i = 0; i < 5 && cur; i++, cur = cur.parentElement) {
-          const inputs = cur.querySelectorAll && cur.querySelectorAll('input');
-          if (inputs && inputs.length) return inputs[0];
+        const a = node.getBoundingClientRect();
+        for (const input of inputs) {
+          const b = input.getBoundingClientRect();
+          if (b.bottom < a.top - 5) continue;
+          const score = Math.abs(a.left - b.left) + Math.abs(a.bottom - b.top) * 3;
+          if (score < bestScore) {
+            bestScore = score;
+            best = input;
+          }
         }
       }
-    } catch (_) {}
-    return null;
+      return best;
+    } catch (_) {
+      return null;
+    }
   };
 
-  const syncOverallInputs = () => {
+  const captureOverall = () => {
     try {
-      const srcMin = findInputNearText(['最低總評','Minimum Overall','Min Overall']);
-      const srcMax = findInputNearText(['最高總評','Maximum Overall','Max Overall']);
-      const dstMin = findInputNearText(['最低評分','Note min','Note minimale du joueur']);
-      const dstMax = findInputNearText(['最高評分','Note max','Note maximale du joueur']);
-
-      const copy = (src, dst) => {
-        if (!src || !dst) return;
-        const v = parseInt(src.value, 10);
-        if (!Number.isFinite(v) || v <= 0) return;
-        if (String(dst.value) === String(v)) return;
-        dst.value = String(v);
-        dst.dispatchEvent(new Event('input', { bubbles: true }));
-        dst.dispatchEvent(new Event('change', { bubbles: true }));
-      };
-
-      copy(srcMin, dstMin);
-      copy(srcMax, dstMax);
+      const minInput = nearestInputToText(['最低總評','Minimum Overall','Min Overall']);
+      const maxInput = nearestInputToText(['最高總評','Maximum Overall','Max Overall']);
+      const min = minInput ? parseInt(minInput.value, 10) : NaN;
+      const max = maxInput ? parseInt(maxInput.value, 10) : NaN;
+      const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      if (Number.isFinite(min) && min >= 1 && min <= 99) page.__MB_SEARCH_MIN_RATING = min;
+      if (Number.isFinite(max) && max >= 1 && max <= 99) page.__MB_SEARCH_MAX_RATING = max;
     } catch (e) {
-      console.warn('[MagicBuyer TC8] 評分同步失敗', e);
+      console.warn('[MagicBuyer TC9] 捕捉總評失敗', e);
     }
   };
 
@@ -132,17 +140,14 @@
     if (!document.documentElement) return setTimeout(startTranslator, 100);
     const obs = new MutationObserver(() => {
       translatePage();
-      setTimeout(syncOverallInputs, 80);
+      setTimeout(captureOverall, 80);
     });
     obs.observe(document.documentElement, { childList:true, subtree:true, characterData:true });
-    document.addEventListener('input', (ev) => {
-      const el = ev.target;
-      if (!(el instanceof HTMLInputElement)) return;
-      setTimeout(syncOverallInputs, 0);
-    }, true);
+    document.addEventListener('input', () => setTimeout(captureOverall, 0), true);
+    document.addEventListener('change', () => setTimeout(captureOverall, 0), true);
     translatePage();
-    setTimeout(syncOverallInputs, 300);
-    setInterval(syncOverallInputs, 1200);
+    setTimeout(captureOverall, 300);
+    setInterval(captureOverall, 1000);
   };
 
   const patchCode = (source) => {
@@ -161,7 +166,7 @@
     if (code.includes(oldRatingRead)) code = code.replace(oldRatingRead, newRatingRead);
 
     const priceVarsNeedle = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);';
-    const priceVarsReplacement = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}`,i.idProgressAutobuyer);';
+    const priceVarsReplacement = 'const __mbPage="undefined"!=typeof unsafeWindow?unsafeWindow:window,__mbMin=Number(__mbPage.__MB_SEARCH_MIN_RATING),__mbMax=Number(__mbPage.__MB_SEARCH_MAX_RATING);Number.isFinite(__mbMin)&&__mbMin>=1&&__mbMin<=99&&(e.idAbMinRating=__mbMin);Number.isFinite(__mbMax)&&__mbMax>=1&&__mbMax<=99&&(e.idAbMaxRating=__mbMax);let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbMin)?"（搜尋頁同步）":""}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
     const ratingCheckNeedle = 'const R=!(D||M)||(0,P.l)(b,D,M),F=O(`${L}(${b}) Prix: ${y} temps: ${p}`);';
@@ -179,7 +184,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc8');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc9');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

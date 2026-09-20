@@ -155,7 +155,13 @@ const harvestSettingsFromPanel = (root) => {
       buyer[key] = value;
     }
   });
-  const criteria = syncMarketCriteria();
+  let criteria;
+  try {
+    criteria = syncMarketCriteria();
+  } catch (e) {
+    console.warn("[MagicBuyer] criteria sync failed", e);
+    criteria = getValue("lastSearchCriteria") || { type: "player", defId: [] };
+  }
   setValue("BuyerSettings", buyer);
   setValue("CommonSettings", common);
   return { buyer, common, criteria };

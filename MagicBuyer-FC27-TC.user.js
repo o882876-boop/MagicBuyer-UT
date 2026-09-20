@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc13
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版（回復可開介面）
+// @version      4.0.0-fc27fix-tc14
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版 + 修正總評範圍
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC13] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC14] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -96,6 +96,108 @@
     setInterval(translatePage, 1200);
   };
 
+  const textNodeExact = (root, label) => {
+    try {
+      const all = [...root.querySelectorAll('label,span,small,div,p')];
+      return all.find((el) => {
+        const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        return txt === label || (txt.includes(label) && txt.length <= label.length + 8);
+      }) || null;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const visibleNumericInputs = (root) => {
+    try {
+      return [...root.querySelectorAll('input')].filter((el) => {
+        if ((el.type || '').toLowerCase() === 'range') return false;
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        const value = parseInt(el.value, 10);
+        return rect.width > 40 && rect.height > 20 &&
+          style.display !== 'none' && style.visibility !== 'hidden' &&
+          Number.isFinite(value) && value >= 1 && value <= 99;
+      });
+    } catch (_) {
+      return [];
+    }
+  };
+
+  const captureSearchRatingRange = () => {
+    try {
+      const root = document.querySelector('#mb-root') || document;
+      const minLabel = textNodeExact(root, '最低總評');
+      const maxLabel = textNodeExact(root, '最高總評');
+      if (!minLabel || !maxLabel) return false;
+
+      const minRect = minLabel.getBoundingClientRect();
+      const maxRect = maxLabel.getBoundingClientRect();
+      const labelBottom = Math.max(minRect.bottom, maxRect.bottom);
+      const labelTop = Math.min(minRect.top, maxRect.top);
+
+      let candidates = visibleNumericInputs(root).filter((input) => {
+        const r = input.getBoundingClientRect();
+        return r.top >= labelTop - 10 && r.top <= labelBottom + 180;
+      });
+
+      // The two overall fields are on the same row directly beneath the two labels.
+      if (candidates.length >= 2) {
+        const rowTop = Math.min(...candidates.map((el) => el.getBoundingClientRect().top));
+        candidates = candidates.filter((el) =>
+          Math.abs(el.getBoundingClientRect().top - rowTop) <= 25
+        );
+      }
+
+      if (candidates.length < 2) return false;
+
+      candidates.sort((a, b) =>
+        a.getBoundingClientRect().left - b.getBoundingClientRect().left
+      );
+
+      const minInput = candidates[0];
+      const maxInput = candidates[candidates.length - 1];
+      const min = parseInt(minInput.value, 10);
+      const max = parseInt(maxInput.value, 10);
+
+      if (!Number.isFinite(min) || !Number.isFinite(max)) return false;
+      if (min < 1 || min > 99 || max < 1 || max > 99) return false;
+
+      const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      page.__MB_SEARCH_MIN_RATING = min;
+      page.__MB_SEARCH_MAX_RATING = max;
+      console.debug('[MagicBuyer TC14] 捕捉總評範圍', min, max);
+      return true;
+    } catch (e) {
+      console.warn('[MagicBuyer TC14] 捕捉總評範圍失敗', e);
+      return false;
+    }
+  };
+
+  const startRatingCapture = () => {
+    document.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.closest || !target.closest('#mb-root')) return;
+      setTimeout(captureSearchRatingRange, 0);
+    }, true);
+
+    document.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.closest || !target.closest('#mb-root')) return;
+      setTimeout(captureSearchRatingRange, 0);
+    }, true);
+
+    document.addEventListener('click', (event) => {
+      const button = event.target && event.target.closest
+        ? event.target.closest('[data-mb-action="start"], .mb-btn-start')
+        : null;
+      if (!button || !button.closest('#mb-root')) return;
+      captureSearchRatingRange();
+    }, true);
+  };
+
   const patchCode = (source) => {
     let code = source;
 
@@ -116,7 +218,7 @@
 
     // Show the actual min/max settings on every search so we can verify whether 75 is really stored.
     const priceVarsNeedle = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);';
-    const priceVarsReplacement = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}`,i.idProgressAutobuyer);';
+    const priceVarsReplacement = 'const __mbPage="undefined"!=typeof unsafeWindow?unsafeWindow:window,__mbMin=parseInt(__mbPage.__MB_SEARCH_MIN_RATING,10),__mbMax=parseInt(__mbPage.__MB_SEARCH_MAX_RATING,10);Number.isFinite(__mbMin)&&__mbMin>=1&&__mbMin<=99&&(e.idAbMinRating=__mbMin);Number.isFinite(__mbMax)&&__mbMax>=1&&__mbMax<=99&&(e.idAbMaxRating=__mbMax);let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbMin)&&Number.isFinite(__mbMax)?"（搜尋頁）":"（市場設定）"}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
     // Hard-filter ratings and print the reason when a card is skipped.
@@ -135,7 +237,8 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc13');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc14');
+      startRatingCapture();
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

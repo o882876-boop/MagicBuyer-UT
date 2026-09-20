@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer Lite FC27 繁體中文
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
-// @description  FC27 簡化自動買家：固定總評範圍 + BIN 上限，無 FUTBIN/出價/自動出售
+// @version      1.1.0
+// @description  FC27 簡化自動買家：總評範圍 + 黃金稀有度 + BIN 上限
 // @author       o882876-boop / OpenAI
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -89,6 +89,7 @@
     const minRating = parseInt($('#mbl-min-rating')?.value, 10);
     const maxRating = parseInt($('#mbl-max-rating')?.value, 10);
     const maxBuy = parseInt($('#mbl-max-buy')?.value, 10);
+    const rarity = ($('#mbl-rarity')?.value || 'gold').trim();
     const waitMin = parseInt($('#mbl-wait-min')?.value, 10);
     const waitMax = parseInt($('#mbl-wait-max')?.value, 10);
     const maxPerCycle = parseInt($('#mbl-max-cycle')?.value, 10);
@@ -98,6 +99,7 @@
       minRating: Number.isFinite(minRating) ? minRating : 75,
       maxRating: Number.isFinite(maxRating) ? maxRating : 99,
       maxBuy: Number.isFinite(maxBuy) ? maxBuy : 800,
+      rarity,
       waitMin: Number.isFinite(waitMin) ? Math.max(3, waitMin) : 8,
       waitMax: Number.isFinite(waitMax) ? Math.max(3, waitMax) : 12,
       maxPerCycle: Number.isFinite(maxPerCycle) ? Math.max(1, maxPerCycle) : 1,
@@ -138,7 +140,7 @@
       maxBid: 0,
       minBuy: 0,
       maxBuy: settings.maxBuy,
-      level: 'any',
+      level: settings.rarity || 'gold',
       maskedDefId: 0,
     };
 
@@ -207,7 +209,10 @@
   const updateHeader = () => {
     const s = getSettings();
     const summary = $('#mbl-summary');
-    if (summary) summary.textContent = `總評 ${s.minRating}–${s.maxRating} · BIN ≤ ${s.maxBuy}`;
+    if (summary) {
+      const rarityName = s.rarity === 'gold' ? '黃金' : s.rarity === 'silver' ? '白銀' : s.rarity === 'bronze' ? '銅' : '任何';
+      summary.textContent = `${rarityName} · 總評 ${s.minRating}–${s.maxRating} · BIN ≤ ${s.maxBuy}`;
+    }
     const stat = $('#mbl-stats');
     if (stat) stat.textContent = `搜尋 ${state.searches} · 買入成功 ${state.bought}`;
     const status = $('#mbl-status');
@@ -233,7 +238,8 @@
       }
 
       const criteria = makeCriteria(settings);
-      log(`搜尋：總評 ${settings.minRating}–${settings.maxRating} · BIN ≤ ${settings.maxBuy}`);
+      const rarityName = settings.rarity === 'gold' ? '黃金' : settings.rarity === 'silver' ? '白銀' : settings.rarity === 'bronze' ? '銅' : '任何';
+      log(`搜尋：${rarityName} · 總評 ${settings.minRating}–${settings.maxRating} · BIN ≤ ${settings.maxBuy}`);
 
       let request;
       try {
@@ -358,7 +364,7 @@
       #mbl-overlay.open{display:flex;align-items:center;justify-content:center}
       #mbl-panel{width:min(900px,94vw);max-height:90vh;overflow:auto;background:#101827;border:1px solid #294055;border-radius:20px;padding:20px;box-shadow:0 24px 80px #000a}
       .mbl-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.mbl-title{font-size:24px;font-weight:800}.mbl-sub{font-size:13px;color:#9fb0c2}
-      .mbl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.mbl-field{background:#162233;border:1px solid #27394c;border-radius:14px;padding:12px}.mbl-field label{display:block;font-size:13px;color:#9fb0c2;margin-bottom:7px}.mbl-field input[type=number]{width:100%;box-sizing:border-box;background:#0e1724;color:#67f0ce;border:1px solid #2b6f71;border-radius:10px;padding:11px;font-size:18px}
+      .mbl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.mbl-field{background:#162233;border:1px solid #27394c;border-radius:14px;padding:12px}.mbl-field label{display:block;font-size:13px;color:#9fb0c2;margin-bottom:7px}.mbl-field input[type=number],.mbl-field select{width:100%;box-sizing:border-box;background:#0e1724;color:#67f0ce;border:1px solid #2b6f71;border-radius:10px;padding:11px;font-size:18px}
       .mbl-actions{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.mbl-actions button,.mbl-close{border:0;border-radius:11px;padding:10px 16px;font-weight:800;cursor:pointer}.mbl-start{background:#3bd8b6}.mbl-pause{background:#ffa544}.mbl-stop{background:#f4555d;color:white}.mbl-clear,.mbl-close{background:#263244;color:#eef5ff}
       .mbl-summary{background:#132637;border:1px solid #245766;border-radius:12px;padding:12px;margin-bottom:12px}.mbl-statusline{display:flex;gap:12px;color:#9fb0c2;font-size:13px;margin-bottom:12px}
       #mbl-log{background:#0a111c;border:1px solid #26364a;border-radius:14px;padding:10px;min-height:260px;max-height:360px;overflow:auto}.mbl-log-row{display:grid;grid-template-columns:85px 1fr;gap:8px;padding:9px;border-bottom:1px solid #1c2a3a;font-size:14px}.mbl-time{color:#76889a}.mbl-log-row.success{color:#78efb8}.mbl-log-row.error{color:#ff8d94}.mbl-log-row.warn{color:#ffd17a}.mbl-log-row.buy{color:#79c7ff}
@@ -387,8 +393,9 @@
           <div><div class="mbl-title">MagicBuyer Lite FC27</div><div class="mbl-sub">只做球員 BIN 搜尋 + 總評過濾 + 自動買入</div></div>
           <button class="mbl-close" type="button">關閉</button>
         </div>
-        <div id="mbl-summary" class="mbl-summary">總評 75–99 · BIN ≤ 800</div>
+        <div id="mbl-summary" class="mbl-summary">黃金 · 總評 75–99 · BIN ≤ 800</div>
         <div class="mbl-grid">
+          <div class="mbl-field"><label>卡片級別</label><select id="mbl-rarity"><option value="gold" selected>黃金</option><option value="silver">白銀</option><option value="bronze">銅</option><option value="any">任何</option></select></div>
           <div class="mbl-field"><label>最低總評</label><input id="mbl-min-rating" type="number" min="1" max="99" value="75"></div>
           <div class="mbl-field"><label>最高總評</label><input id="mbl-max-rating" type="number" min="1" max="99" value="99"></div>
           <div class="mbl-field"><label>最高立即購買 BIN</label><input id="mbl-max-buy" type="number" min="150" step="50" value="800"></div>
@@ -419,7 +426,7 @@
     $('.mbl-stop', overlay).addEventListener('click', stop);
     $('.mbl-clear', overlay).addEventListener('click', () => { const x=$('#mbl-log'); if(x) x.innerHTML=''; });
 
-    overlay.querySelectorAll('input').forEach((input) => {
+    overlay.querySelectorAll('input, select').forEach((input) => {
       input.addEventListener('input', updateHeader);
       input.addEventListener('change', updateHeader);
     });

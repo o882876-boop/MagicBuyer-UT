@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc12
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + FC27 穩定評分範圍
+// @version      4.0.0-fc27fix-tc13
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版（回復可開介面）
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC12] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC13] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -96,109 +96,6 @@
     setInterval(translatePage, 1200);
   };
 
-  const visibleIn = (scope) => [...scope.querySelectorAll('input')].filter((el) => {
-    try {
-      const r = el.getBoundingClientRect();
-      const cs = getComputedStyle(el);
-      return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
-    } catch (_) { return false; }
-  });
-
-  const readRatingRangeOnce = () => {
-    try {
-      const scope =
-        document.querySelector('#mb-root .mb-page[data-page="market"].is-active') ||
-        document.querySelector('#mb-root .mb-page[data-page="market"]') ||
-        document.querySelector('#mb-root') ||
-        document;
-      const inputs = visibleIn(scope);
-      const nodes = [...scope.querySelectorAll('label,span,small,div,p,h2,h3')];
-
-      const findInput = (needles) => {
-        let best = null;
-        let bestScore = Infinity;
-        for (const node of nodes) {
-          const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-          if (!text || text.length > 120 || !needles.some((n) => text.includes(n))) continue;
-          const direct = node.querySelector && node.querySelector('input');
-          if (direct && inputs.includes(direct)) return direct;
-          const a = node.getBoundingClientRect();
-          for (const input of inputs) {
-            const v = parseInt(input.value, 10);
-            if (!Number.isFinite(v) || v < 1 || v > 99) continue;
-            const b = input.getBoundingClientRect();
-            if (b.bottom < a.top - 20) continue;
-            const score =
-              Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2) +
-              Math.abs(a.bottom - b.top) * 3;
-            if (score < bestScore) {
-              bestScore = score;
-              best = input;
-            }
-          }
-        }
-        return best;
-      };
-
-      let minInput = findInput(['最低總評','Minimum Overall','Min Overall','Overall min','Note min']);
-      let maxInput = findInput(['最高總評','Maximum Overall','Max Overall','Overall max','Note max']);
-
-      if (!minInput || !maxInput || minInput === maxInput) {
-        for (const block of [...scope.querySelectorAll('div,section,article')]) {
-          const text = (block.textContent || '').replace(/\s+/g, ' ');
-          if (!/總評|Overall|Note/.test(text)) continue;
-          const vals = [...block.querySelectorAll('input')].filter((el) => {
-            if (!inputs.includes(el)) return false;
-            const v = parseInt(el.value, 10);
-            return Number.isFinite(v) && v >= 1 && v <= 99;
-          });
-          if (vals.length >= 2) {
-            vals.sort((a,b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-            minInput = minInput || vals[0];
-            maxInput = maxInput || vals[1];
-            break;
-          }
-        }
-      }
-
-      const min = minInput ? parseInt(minInput.value, 10) : NaN;
-      const max = maxInput ? parseInt(maxInput.value, 10) : NaN;
-      const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-
-      if (Number.isFinite(min) && min >= 1 && min <= 99) page.__MB_SEARCH_MIN_RATING = min;
-      if (Number.isFinite(max) && max >= 1 && max <= 99) page.__MB_SEARCH_MAX_RATING = max;
-
-      if (Number.isFinite(min) || Number.isFinite(max)) {
-        console.debug('[MagicBuyer TC12] 搜尋總評', min, max);
-      }
-    } catch (e) {
-      console.warn('[MagicBuyer TC12] 讀取搜尋總評失敗', e);
-    }
-  };
-
-  const startRatingCapture = () => {
-    document.addEventListener('input', (event) => {
-      const el = event.target;
-      if (!(el instanceof HTMLInputElement)) return;
-      if (!el.closest || !el.closest('#mb-root')) return;
-      setTimeout(readRatingRangeOnce, 0);
-    }, true);
-
-    document.addEventListener('change', (event) => {
-      const el = event.target;
-      if (!(el instanceof HTMLInputElement)) return;
-      if (!el.closest || !el.closest('#mb-root')) return;
-      setTimeout(readRatingRangeOnce, 0);
-    }, true);
-
-    document.addEventListener('click', (event) => {
-      const target = event.target && event.target.closest
-        ? event.target.closest('[data-mb-action="start"], .mb-btn-start')
-        : null;
-      if (target && target.closest('#mb-root')) readRatingRangeOnce();
-    }, true);
-  };
-
   const patchCode = (source) => {
     let code = source;
 
@@ -219,7 +116,7 @@
 
     // Show the actual min/max settings on every search so we can verify whether 75 is really stored.
     const priceVarsNeedle = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);';
-    const priceVarsReplacement = 'const __mbPage="undefined"!=typeof unsafeWindow?unsafeWindow:window,__mbMin=parseInt(__mbPage.__MB_SEARCH_MIN_RATING,10),__mbMax=parseInt(__mbPage.__MB_SEARCH_MAX_RATING,10);Number.isFinite(__mbMin)&&__mbMin>=1&&__mbMin<=99&&(e.idAbMinRating=__mbMin);Number.isFinite(__mbMax)&&__mbMax>=1&&__mbMax<=99&&(e.idAbMaxRating=__mbMax);let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbMin)||Number.isFinite(__mbMax)?"（搜尋頁）":"（市場設定）"}`,i.idProgressAutobuyer);';
+    const priceVarsReplacement = 'let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
     // Hard-filter ratings and print the reason when a card is skipped.
@@ -238,8 +135,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc12');
-      startRatingCapture();
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc13');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

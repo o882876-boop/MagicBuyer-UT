@@ -56,6 +56,49 @@ const pickEaId = (criteria) => {
   return (player && Number(player.eaId)) || 0;
 };
 
+export const extractRatingRange = (raw) => {
+  let min = 0;
+  let max = 0;
+  const seen = new Set();
+
+  const visit = (value, depth = 0, path = "") => {
+    if (!value || typeof value !== "object" || depth > 2 || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    Object.keys(value).forEach((key) => {
+      let child;
+      try {
+        child = value[key];
+      } catch (e) {
+        return;
+      }
+      const keyPath = `${path}.${key}`.toLowerCase();
+      const n = parseInt(child, 10);
+      const isRatingField = /rating|overall|ovr/.test(keyPath);
+      if (isRatingField && Number.isFinite(n) && n >= 1 && n <= 99) {
+        if (/min|from|low/.test(keyPath)) {
+          min = n;
+        }
+        if (/max|to|high/.test(keyPath)) {
+          max = n;
+        }
+      }
+      if (
+        depth < 2 &&
+        child &&
+        typeof child === "object" &&
+        !Array.isArray(child)
+      ) {
+        visit(child, depth + 1, keyPath);
+      }
+    });
+  };
+
+  visit(raw);
+  return { min, max };
+};
+
 const isEmptyFilter = (key, value) => {
   if (value == null || value === "") {
     return true;
@@ -140,6 +183,13 @@ export const sanitizeEaSearchCriteria = (raw) => {
   FORBIDDEN_KEYS.forEach((key) => {
     delete out[key];
   });
+  const ratingRange = extractRatingRange(source);
+  if (ratingRange.min) {
+    out.mbMinRating = ratingRange.min;
+  }
+  if (ratingRange.max) {
+    out.mbMaxRating = ratingRange.max;
+  }
   return out;
 };
 

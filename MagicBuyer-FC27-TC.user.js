@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc14
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版 + 修正總評範圍
+// @version      4.0.0-fc27fix-tc15
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版 + 真正套用總評/價格搜尋範圍
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC14] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC15] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -166,10 +166,10 @@
       const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       page.__MB_SEARCH_MIN_RATING = min;
       page.__MB_SEARCH_MAX_RATING = max;
-      console.debug('[MagicBuyer TC14] 捕捉總評範圍', min, max);
+      console.debug('[MagicBuyer TC15] 捕捉總評範圍', min, max);
       return true;
     } catch (e) {
-      console.warn('[MagicBuyer TC14] 捕捉總評範圍失敗', e);
+      console.warn('[MagicBuyer TC15] 捕捉總評範圍失敗', e);
       return false;
     }
   };
@@ -221,6 +221,24 @@
     const priceVarsReplacement = 'const __mbPage="undefined"!=typeof unsafeWindow?unsafeWindow:window,__mbMin=parseInt(__mbPage.__MB_SEARCH_MIN_RATING,10),__mbMax=parseInt(__mbPage.__MB_SEARCH_MAX_RATING,10);Number.isFinite(__mbMin)&&__mbMin>=1&&__mbMin<=99&&(e.idAbMinRating=__mbMin);Number.isFinite(__mbMax)&&__mbMax>=1&&__mbMax<=99&&(e.idAbMaxRating=__mbMax);let S=_(e.idAbMaxBid),T=_(e.idAbBuyPrice);(0,c.c2)(`評分篩選：最低 ${null!=e.idAbMinRating?e.idAbMinRating:"-"} / 最高 ${null!=e.idAbMaxRating?e.idAbMaxRating:"-"}${Number.isFinite(__mbMin)&&Number.isFinite(__mbMax)?"（搜尋頁）":"（市場設定）"}`,i.idProgressAutobuyer);';
     if (code.includes(priceVarsNeedle)) code = code.replace(priceVarsNeedle, priceVarsReplacement);
 
+    // Apply the configured maximum buy price to the actual EA search request.
+    // This prevents the market request from intentionally asking for cards above the buy ceiling.
+    const queryMaxBuyNeedle = 'p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),B=(0,$.rG)(B);const M=(0,$.h1)(B);';
+    const queryMaxBuyReplacement = 'p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),T&&(!B.maxBuy||B.maxBuy>T)&&(B.maxBuy=T),B=(0,$.rG)(B);const M=(0,$.h1)(B);';
+    if (code.includes(queryMaxBuyNeedle)) code = code.replace(queryMaxBuyNeedle, queryMaxBuyReplacement);
+
+    // FC27 may still return broader results than the requested range.
+    // Keep the raw count for pagination, but only expose/process cards that satisfy
+    // the user's overall-rating range and max-buy price.
+    const resultFilterNeedle = 'r.success&&r.data&&Array.isArray(r.data.items)){(0,a.sO)("searchFailedCount",0);let t=!0;';
+    const resultFilterReplacement = 'r.success&&r.data&&Array.isArray(r.data.items)){r.__mbRawItemCount=r.data.items.length;const __mbMinFilter=parseInt(e.idAbMinRating,10),__mbMaxFilter=parseInt(e.idAbMaxRating,10);r.data.items=r.data.items.filter((z=>{let q=NaN;try{q=parseInt(z&&z.rating,10)}catch(e){}if(!Number.isFinite(q))try{q=parseInt(z&&"function"==typeof z.getRating?z.getRating():NaN,10)}catch(e){}if(!Number.isFinite(q))try{const e=z&&z._staticData||{};q=parseInt(e.rating||e.overallRating||e.overall||e.ovr||NaN,10)}catch(e){}const a=z&&z._auction,p=a&&parseInt(a.buyNowPrice,10),m=!Number.isFinite(__mbMinFilter)||q>=__mbMinFilter,h=!Number.isFinite(__mbMaxFilter)||q<=__mbMaxFilter,g=!T||Number.isFinite(p)&&p<=T;return Number.isFinite(q)&&m&&h&&g}));(0,a.sO)("searchFailedCount",0);let t=!0;';
+    if (code.includes(resultFilterNeedle)) code = code.replace(resultFilterNeedle, resultFilterReplacement);
+
+    // Pagination must use EA's raw result count, not the client-side filtered count.
+    const paginationNeedle = 'const s=r.data&&r.data.items&&r.data.items.length||0;m<e.idAbMaxSearchPage&&21===s?';
+    const paginationReplacement = 'const s=r.__mbRawItemCount||(r.data&&r.data.items&&r.data.items.length||0);m<e.idAbMaxSearchPage&&21===s?';
+    if (code.includes(paginationNeedle)) code = code.replace(paginationNeedle, paginationReplacement);
+
     // Hard-filter ratings and print the reason when a card is skipped.
     const ratingCheckNeedle = 'const R=!(D||M)||(0,P.l)(b,D,M),F=O(`${L}(${b}) Prix: ${y} temps: ${p}`);';
     const ratingCheckReplacement = 'const R=Number.isFinite(b)&&(!(D||M)||(0,P.l)(b,D,M)),F=O(`${L}(${Number.isFinite(b)?b:"?"}) Prix: ${y} temps: ${p}`);';
@@ -237,7 +255,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc14');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc15');
       startRatingCapture();
       startTranslator();
     } catch (err) {

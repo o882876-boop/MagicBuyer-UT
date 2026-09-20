@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc15
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版 + 真正套用總評/價格搜尋範圍
+// @version      4.0.0-fc27fix-tc16
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 穩定版 + 修正EA搜尋價格同步
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC15] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC16] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -166,10 +166,10 @@
       const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       page.__MB_SEARCH_MIN_RATING = min;
       page.__MB_SEARCH_MAX_RATING = max;
-      console.debug('[MagicBuyer TC15] 捕捉總評範圍', min, max);
+      console.debug('[MagicBuyer TC16] 捕捉總評範圍', min, max);
       return true;
     } catch (e) {
-      console.warn('[MagicBuyer TC15] 捕捉總評範圍失敗', e);
+      console.warn('[MagicBuyer TC16] 捕捉總評範圍失敗', e);
       return false;
     }
   };
@@ -224,7 +224,7 @@
     // Apply the configured maximum buy price to the actual EA search request.
     // This prevents the market request from intentionally asking for cards above the buy ceiling.
     const queryMaxBuyNeedle = 'p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),B=(0,$.rG)(B);const M=(0,$.h1)(B);';
-    const queryMaxBuyReplacement = 'p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),T&&(!B.maxBuy||B.maxBuy>T)&&(B.maxBuy=T),B=(0,$.rG)(B);const M=(0,$.h1)(B);';
+    const queryMaxBuyReplacement = 'p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),T&&(B.maxBuy=T),B=(0,$.rG)(B);(0,c.c2)(\`EA實際搜尋：BIN ≤ \${B.maxBuy||"-"}\`,i.idProgressAutobuyer);const M=(0,$.h1)(B);';
     if (code.includes(queryMaxBuyNeedle)) code = code.replace(queryMaxBuyNeedle, queryMaxBuyReplacement);
 
     // FC27 may still return broader results than the requested range.
@@ -255,7 +255,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc15');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc16');
       startRatingCapture();
       startTranslator();
     } catch (err) {

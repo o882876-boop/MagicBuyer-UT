@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc17
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 原版介面 + Lite 搜尋核心
+// @version      4.0.0-fc27fix-tc18
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 原版介面 + Lite 搜尋核心（直接EA DTO）
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC17] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC18] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -154,10 +154,10 @@
 
       const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       page.__MB_SEARCH_MAX_BUY = maxBuy;
-      console.debug('[MagicBuyer TC17] 捕捉最高 BIN', maxBuy);
+      console.debug('[MagicBuyer TC18] 捕捉最高 BIN', maxBuy);
       return true;
     } catch (e) {
-      console.warn('[MagicBuyer TC17] 捕捉最高 BIN 失敗', e);
+      console.warn('[MagicBuyer TC18] 捕捉最高 BIN 失敗', e);
       return false;
     }
   };
@@ -204,10 +204,10 @@
       const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       page.__MB_SEARCH_MIN_RATING = min;
       page.__MB_SEARCH_MAX_RATING = max;
-      console.debug('[MagicBuyer TC17] 捕捉總評範圍', min, max);
+      console.debug('[MagicBuyer TC18] 捕捉總評範圍', min, max);
       return true;
     } catch (e) {
-      console.warn('[MagicBuyer TC17] 捕捉總評範圍失敗', e);
+      console.warn('[MagicBuyer TC18] 捕捉總評範圍失敗', e);
       return false;
     }
   };
@@ -277,7 +277,7 @@
     // Throw away stale/native criteria and build the same clean EA query as Lite:
     // player + gold + current BIN ceiling only.
     const criteriaNeedle = 'let B=(0,$.rG)(w);if(!B||!B.maskedDefId&&!B.type)return n("Aucun critère de recherche. Choisis un joueur dans Recherche.","warning");const D=!B.maskedDefId;d&&!B.minBid&&D&&(B.minBid=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBidInput))),p&&!B.minBuy&&D&&(B.minBuy=(0,v.GG)((0,l.pl)(0,e.idAbRandMinBuyInput))),B=(0,$.rG)(B);const M=(0,$.h1)(B);';
-    const criteriaReplacement = 'const __mbGold=window.SearchLevel&&null!=window.SearchLevel.GOLD?window.SearchLevel.GOLD:"gold";let B=(0,$.rG)({type:"player",category:"any",level:__mbGold,minBid:0,maxBid:0,minBuy:0,maxBuy:T,maskedDefId:0,defId:[]}),D=!0;const __mbKey=[T,e.idAbMinRating,e.idAbMaxRating,String(__mbGold)].join("|");__mbPoolKey!==__mbKey&&(__mbPoolKey=__mbKey,__mbPool.clear(),(0,a.sO)("currentPage",1),m=1);const M=(0,$.h1)(B);';
+    const criteriaReplacement = 'const __mbPageObj="undefined"!=typeof unsafeWindow?unsafeWindow:window,__mbGold=__mbPageObj.SearchLevel&&null!=__mbPageObj.SearchLevel.GOLD?__mbPageObj.SearchLevel.GOLD:"gold",__mbPlayer=__mbPageObj.SearchType&&null!=__mbPageObj.SearchType.PLAYER?__mbPageObj.SearchType.PLAYER:"player",__mbAny=__mbPageObj.SearchCategory&&null!=__mbPageObj.SearchCategory.ANY?__mbPageObj.SearchCategory.ANY:"any";let B={type:__mbPlayer,category:__mbAny,position:"any",zone:-1,nationality:-1,league:-1,club:-1,playStyle:-1,playStylePlus:-1,minBid:0,maxBid:0,minBuy:0,maxBuy:T,level:__mbGold,maskedDefId:0,defId:[],rarities:[],types:[],playStyles:[],roles:[],playerRoles:[],traits:[],chemistryStyles:[]},D=!0;const __mbKey=[T,e.idAbMinRating,e.idAbMaxRating,String(__mbGold),String(__mbPlayer)].join("|");__mbPoolKey!==__mbKey&&(__mbPoolKey=__mbKey,__mbPool.clear(),(0,a.sO)("currentPage",1),m=1);let M=B;for(const __mbCtorName of["UTSearchCriteriaDTO","SearchCriteria","UTItemSearchCriteriaDTO","UTMarketSearchCriteriaDTO"]){const __mbCtor=__mbPageObj&&__mbPageObj[__mbCtorName];if("function"==typeof __mbCtor)try{M=new __mbCtor,Object.assign(M,B);break}catch(e){}}for(const __mbArr of["defId","rarities","types","playStyles","roles","playerRoles","traits","chemistryStyles"])Array.isArray(M[__mbArr])||(M[__mbArr]=[]);(0,c.c2)(\`EA條件：type=\${String(M.type)} · level=\${String(M.level)} · BIN≤\${M.maxBuy} · page \${m}\`,i.idProgressAutobuyer);';
     if (code.includes(criteriaNeedle)) code = code.replace(criteriaNeedle, criteriaReplacement);
 
     // Accumulate up to 21 fully eligible cards across EA pages, then buy one from that pool.
@@ -286,7 +286,7 @@
     if (code.includes(resultNeedle)) code = code.replace(resultNeedle, resultReplacement);
 
     const paginationNeedle = 'const s=r.data&&r.data.items&&r.data.items.length||0;m<e.idAbMaxSearchPage&&21===s?(0,a._i)("currentPage"):(0,a.sO)("currentPage",1),t()';
-    const paginationReplacement = 'const s=r.__mbRawItemCount||0;r.__mbPoolReady?(0,a.sO)("currentPage",1):m<5&&21===s?(0,a._i)("currentPage"):(0,a.sO)("currentPage",1),t()';
+    const paginationReplacement = 'const s=r.__mbRawItemCount||0;0===s&&(__mbPool.clear(),(0,a.sO)("currentPage",1)),r.__mbPoolReady?(0,a.sO)("currentPage",1):m<5&&21===s?(0,a._i)("currentPage"):(0,a.sO)("currentPage",1),t()';
     if (code.includes(paginationNeedle)) code = code.replace(paginationNeedle, paginationReplacement);
 
     // Hard-filter ratings and print the reason when a card is skipped.
@@ -305,7 +305,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc17');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc18');
       startRatingCapture();
       startTranslator();
     } catch (err) {

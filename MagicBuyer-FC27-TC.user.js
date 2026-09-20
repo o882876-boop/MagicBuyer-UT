@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer FC27 繁體中文版
 // @namespace    http://tampermonkey.net/
-// @version      4.0.0-fc27fix-tc9
-// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 搜尋總評直接同步
+// @version      4.0.0-fc27fix-tc10
+// @description  MagicBuyer FC27 相容修正 + 完整繁體中文 + 搜尋總評穩定同步
 // @author       AMINE1921 / TC patch
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -51,7 +51,7 @@
         translations = eval(arrayText).sort((a,b) => b[0].length - a[0].length);
       }
     } catch (err) {
-      console.warn('[MagicBuyer TC9] 無法載入 tc5 翻譯字典', err);
+      console.warn('[MagicBuyer TC10] 無法載入 tc5 翻譯字典', err);
     }
   };
 
@@ -99,17 +99,19 @@
     try {
       const nodes = [...document.querySelectorAll('label,span,div,p,small')].filter((el) => {
         const txt = (el.textContent || '').trim().replace(/\s+/g, ' ');
-        return labels.some((label) => txt === label || txt.startsWith(label + ':'));
+        return labels.some((label) => txt.includes(label));
       });
       const inputs = visibleInputs();
       let best = null;
       let bestScore = Infinity;
       for (const node of nodes) {
+        const own = node.querySelector && node.querySelector('input');
+        if (own && own.offsetParent !== null) return own;
         const a = node.getBoundingClientRect();
         for (const input of inputs) {
           const b = input.getBoundingClientRect();
-          if (b.bottom < a.top - 5) continue;
-          const score = Math.abs(a.left - b.left) + Math.abs(a.bottom - b.top) * 3;
+          if (b.bottom < a.top - 12) continue;
+          const score = Math.abs((a.left+a.right)/2-(b.left+b.right)/2) + Math.abs(a.bottom-b.top) * 3;
           if (score < bestScore) {
             bestScore = score;
             best = input;
@@ -122,17 +124,47 @@
     }
   };
 
+  const findOverallPair = () => {
+    try {
+      const blocks = [...document.querySelectorAll('div,section,article,form')];
+      for (const block of blocks) {
+        const txt = (block.textContent || '').replace(/\s+/g,' ');
+        if (!(txt.includes('最低總評') && txt.includes('最高總評'))) continue;
+        const nums = [...block.querySelectorAll('input')].filter((el) => {
+          const r = el.getBoundingClientRect();
+          const v = parseInt(el.value,10);
+          return r.width > 0 && r.height > 0 && Number.isFinite(v) && v >= 1 && v <= 99;
+        });
+        if (nums.length >= 2) {
+          nums.sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left);
+          return [nums[0], nums[1]];
+        }
+      }
+    } catch (_) {}
+    return [null,null];
+  };
+
   const captureOverall = () => {
     try {
-      const minInput = nearestInputToText(['最低總評','Minimum Overall','Min Overall']);
-      const maxInput = nearestInputToText(['最高總評','Maximum Overall','Max Overall']);
+      let minInput = nearestInputToText(['最低總評','Minimum Overall','Min Overall']);
+      let maxInput = nearestInputToText(['最高總評','Maximum Overall','Max Overall']);
+      if (!minInput || !maxInput || minInput === maxInput) {
+        const pair = findOverallPair();
+        minInput = minInput || pair[0];
+        maxInput = maxInput || pair[1];
+        if (minInput === maxInput) { minInput = pair[0]; maxInput = pair[1]; }
+      }
       const min = minInput ? parseInt(minInput.value, 10) : NaN;
       const max = maxInput ? parseInt(maxInput.value, 10) : NaN;
       const page = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
       if (Number.isFinite(min) && min >= 1 && min <= 99) page.__MB_SEARCH_MIN_RATING = min;
       if (Number.isFinite(max) && max >= 1 && max <= 99) page.__MB_SEARCH_MAX_RATING = max;
+      if (Number.isFinite(min) || Number.isFinite(max)) {
+        page.__MB_SEARCH_RATING_CAPTURED = true;
+        console.debug('[MagicBuyer TC10] 捕捉搜尋總評', min, max);
+      }
     } catch (e) {
-      console.warn('[MagicBuyer TC9] 捕捉總評失敗', e);
+      console.warn('[MagicBuyer TC10] 捕捉總評失敗', e);
     }
   };
 
@@ -184,7 +216,7 @@
     try {
       const patched = patchCode(source);
       eval(patched + '\n//# sourceURL=MagicBuyer-FC27-TC-runtime.js');
-      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc9');
+      console.log('[MagicBuyer FC27 TC] 已載入修正版 tc10');
       startTranslator();
     } catch (err) {
       console.error('[MagicBuyer FC27 TC] 載入失敗', err);

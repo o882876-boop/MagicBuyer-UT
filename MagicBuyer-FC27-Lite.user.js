@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer Lite FC27 繁體中文
 // @namespace    http://tampermonkey.net/
-// @version      1.2.0
-// @description  FC27 簡化自動買家：只搜球員 + 黃金級別 + 總評/BIN 硬過濾
+// @version      1.3.0
+// @description  FC27 簡化自動買家：EA先篩黃金/BIN，再累積合資格候選先買
 // @author       o882876-boop / OpenAI
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -27,6 +27,9 @@
     searches: 0,
     bought: 0,
     seen: new Set(),
+    candidatePool: new Map(),
+    nextPage: 1,
+    poolKey: '',
     busy: false,
   };
 
@@ -167,9 +170,24 @@
       } catch (_) {}
     }
 
+    const levelMap = {
+      gold: page.SearchLevel && page.SearchLevel.GOLD != null ? page.SearchLevel.GOLD : 'gold',
+      silver: page.SearchLevel && page.SearchLevel.SILVER != null ? page.SearchLevel.SILVER : 'silver',
+      bronze: page.SearchLevel && page.SearchLevel.BRONZE != null ? page.SearchLevel.BRONZE : 'bronze',
+      any: page.SearchLevel && page.SearchLevel.ANY != null ? page.SearchLevel.ANY : 'any',
+    };
+    const playerType =
+      page.SearchType && page.SearchType.PLAYER != null
+        ? page.SearchType.PLAYER
+        : 'player';
+    const anyCategory =
+      page.SearchCategory && page.SearchCategory.ANY != null
+        ? page.SearchCategory.ANY
+        : 'any';
+
     const values = {
-      type: 'player',
-      category: 'any',
+      type: playerType,
+      category: anyCategory,
       position: 'any',
       zone: -1,
       nationality: -1,
@@ -181,8 +199,9 @@
       maxBid: 0,
       minBuy: 0,
       maxBuy: settings.maxBuy,
-      level: settings.rarity || 'gold',
+      level: levelMap[settings.rarity] ?? levelMap.gold,
       maskedDefId: 0,
+      count: 21,
     };
 
     Object.keys(values).forEach((k) => {
@@ -280,11 +299,19 @@
 
       const criteria = makeCriteria(settings);
       const rarityName = settings.rarity === 'gold' ? '黃金' : settings.rarity === 'silver' ? '白銀' : settings.rarity === 'bronze' ? '銅' : '任何';
-      log(`搜尋：${rarityName} · 總評 ${settings.minRating}–${settings.maxRating} · BIN ≤ ${settings.maxBuy}`);
+      const settingsKey = [settings.rarity, settings.minRating, settings.maxRating, settings.maxBuy].join('|');
+      if (state.poolKey !== settingsKey) {
+        state.poolKey = settingsKey;
+        state.candidatePool.clear();
+        state.nextPage = 1;
+      }
+
+      const currentPage = state.nextPage;
+      log(`EA搜尋 page ${currentPage}：${rarityName} · BIN ≤ ${settings.maxBuy}；候選再篩總評 ${settings.minRating}–${settings.maxRating}`);
 
       let request;
       try {
-        request = services.Item.searchTransferMarket(criteria, 1);
+        request = services.Item.searchTransferMarket(criteria, currentPage);
       } catch (_) {
         request = services.Item.searchTransferMarket(criteria);
       }
@@ -294,10 +321,10 @@
       state.searches++;
 
       const playerItems = items.filter(isPlayerCard);
-      const goldItems = settings.rarity === 'gold'
+      const qualityItems = settings.rarity === 'gold'
         ? playerItems.filter(isGoldCard)
         : playerItems;
-      const eligible = goldItems.filter((player) => {
+      const eligible = qualityItems.filter((player) => {
         const auction = getAuction(player);
         const rating = getRating(player);
         const bin = auction && parseInt(auction.buyNowPrice, 10);
@@ -309,23 +336,44 @@
           bin <= settings.maxBuy;
       });
 
+      for (const player of eligible) {
+        const auction = getAuction(player);
+        const tradeId = auction && (auction.tradeId || auction.id);
+        if (tradeId) state.candidatePool.set(String(tradeId), player);
+      }
+
+      const targetCandidates = 21;
+      const maxPages = 5;
+      const reachedEnd = items.length < 21;
+      const poolSize = state.candidatePool.size;
+
       log(
-        `EA 回傳 ${items.length} 張；球員 ${playerItems.length} 張；${settings.rarity === 'gold' ? '黃金 ' + goldItems.length + ' 張；' : ''}符合條件 ${eligible.length} 張`,
-        eligible.length ? 'ok' : 'info'
+        `EA 回傳 ${items.length} 張；本頁符合 ${eligible.length} 張；候選池 ${poolSize}/${targetCandidates}`,
+        poolSize ? 'ok' : 'info'
       );
 
-      if (!settings.autoBuy || !eligible.length) {
+      if (poolSize < targetCandidates && !reachedEnd && currentPage < maxPages) {
+        state.nextPage = currentPage + 1;
         updateHeader();
         return;
       }
 
-      eligible.sort((a, b) => {
+      const candidates = [...state.candidatePool.values()];
+      state.nextPage = 1;
+
+      if (!settings.autoBuy || !candidates.length) {
+        if (reachedEnd || currentPage >= maxPages) state.candidatePool.clear();
+        updateHeader();
+        return;
+      }
+
+      candidates.sort((a, b) => {
         const aa = getAuction(a), bb = getAuction(b);
         return (aa?.buyNowPrice || Infinity) - (bb?.buyNowPrice || Infinity);
       });
 
       let boughtThisCycle = 0;
-      for (const player of eligible) {
+      for (const player of candidates) {
         if (!state.running || state.paused || boughtThisCycle >= settings.maxPerCycle) break;
         const auction = getAuction(player);
         if (!auction) continue;
@@ -338,21 +386,31 @@
         const price = parseInt(auction.buyNowPrice, 10);
 
         // Final hard guard immediately before the purchase call.
-        if (!(rating >= settings.minRating && rating <= settings.maxRating && price <= settings.maxBuy)) {
+        if (!(isPlayerCard(player) &&
+              (settings.rarity !== 'gold' || isGoldCard(player)) &&
+              rating >= settings.minRating &&
+              rating <= settings.maxRating &&
+              price <= settings.maxBuy)) {
           log(`跳過 ${name} (${rating}) · ${price}`, 'warn');
           continue;
         }
 
         try {
-          log(`嘗試買入 ${name} (${rating}) · ${price}`, 'buy');
+          log(`由 ${candidates.length} 張候選中買：${name} (${rating}) · ${price}`, 'buy');
           await buyNow(player, price);
           state.bought++;
           boughtThisCycle++;
           log(`買入成功：${name} (${rating}) · ${price}`, 'success');
+          state.candidatePool.clear();
+          state.nextPage = 1;
           await sleep(1200);
         } catch (e) {
           log(`買入失敗：${name} · ${e && e.message ? e.message : e}`, 'error');
         }
+      }
+
+      if (!boughtThisCycle && (reachedEnd || currentPage >= maxPages)) {
+        state.candidatePool.clear();
       }
       updateHeader();
     } catch (e) {
@@ -397,6 +455,8 @@
   const stop = () => {
     state.running = false;
     state.paused = false;
+    state.candidatePool.clear();
+    state.nextPage = 1;
     clearTimeout(state.timer);
     updateHeader();
     log('已停止');

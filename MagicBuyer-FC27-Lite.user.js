@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         MagicBuyer Lite FC27 繁體中文
 // @namespace    http://tampermonkey.net/
-// @version      1.1.0
-// @description  FC27 簡化自動買家：總評範圍 + 黃金稀有度 + BIN 上限
+// @version      1.2.0
+// @description  FC27 簡化自動買家：只搜球員 + 黃金級別 + 總評/BIN 硬過濾
 // @author       o882876-boop / OpenAI
 // @match        https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app*
 // @match        https://www.ea.com/ea-sports-fc/ultimate-team/web-app*
@@ -84,6 +84,47 @@
   };
 
   const getAuction = (player) => (player && (player._auction || (typeof player.getAuctionData === 'function' && player.getAuctionData()))) || null;
+
+  const isPlayerCard = (item) => {
+    try {
+      if (!item) return false;
+      const t = String(item.type || item.itemType || item._type || '').toLowerCase();
+      if (t === 'player') return true;
+      if (item._staticData) {
+        const st = String(item._staticData.type || item._staticData.itemType || '').toLowerCase();
+        if (st === 'player') return true;
+      }
+      // FC27 player objects normally expose rating / preferredPosition / definitionId.
+      return Number.isFinite(getRating(item)) &&
+        (!!item.definitionId || !!item.preferredPosition || !!item._staticData);
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const isGoldCard = (item) => {
+    if (!isPlayerCard(item)) return false;
+    const rating = getRating(item);
+    if (!Number.isFinite(rating) || rating < 75) return false;
+
+    try {
+      const values = [
+        item.level, item.quality, item.tier, item.rarity, item.itemQuality,
+        item._staticData && item._staticData.level,
+        item._staticData && item._staticData.quality,
+        item._staticData && item._staticData.tier,
+        item._staticData && item._staticData.rarity
+      ].filter((v) => v != null).map((v) => String(v).toLowerCase());
+
+      // If EA exposes an explicit bronze/silver marker, reject it.
+      if (values.some((v) => /bronze|silver|銅|銀/.test(v))) return false;
+      // A visible gold marker is a positive match.
+      if (values.some((v) => /gold|黃金/.test(v))) return true;
+    } catch (_) {}
+
+    // In Ultimate Team, player ratings 75+ are gold-tier for base quality.
+    return rating >= 75;
+  };
 
   const getSettings = () => {
     const minRating = parseInt($('#mbl-min-rating')?.value, 10);
@@ -252,7 +293,11 @@
       const items = normalizeItems(response);
       state.searches++;
 
-      const eligible = items.filter((player) => {
+      const playerItems = items.filter(isPlayerCard);
+      const goldItems = settings.rarity === 'gold'
+        ? playerItems.filter(isGoldCard)
+        : playerItems;
+      const eligible = goldItems.filter((player) => {
         const auction = getAuction(player);
         const rating = getRating(player);
         const bin = auction && parseInt(auction.buyNowPrice, 10);
@@ -264,7 +309,10 @@
           bin <= settings.maxBuy;
       });
 
-      log(`EA 回傳 ${items.length} 張；符合條件 ${eligible.length} 張`, eligible.length ? 'ok' : 'info');
+      log(
+        `EA 回傳 ${items.length} 張；球員 ${playerItems.length} 張；${settings.rarity === 'gold' ? '黃金 ' + goldItems.length + ' 張；' : ''}符合條件 ${eligible.length} 張`,
+        eligible.length ? 'ok' : 'info'
+      );
 
       if (!settings.autoBuy || !eligible.length) {
         updateHeader();

@@ -16,7 +16,11 @@ import { updateRequestCount } from "./statsUtil";
 import { sortPlayers } from "./playerUtil";
 import { getStatsValue } from "../handlers/statsProcessor";
 import { fetchPrices } from "../services/datasource";
-import { sanitizeEaSearchCriteria, toEaSearchDto } from "../ui/buyerContext";
+import {
+  extractRatingRange,
+  sanitizeEaSearchCriteria,
+  toEaSearchDto,
+} from "../ui/buyerContext";
 import { getPageServices, syncPageGlobals } from "./pageWindow";
 
 const currentBids = new Set();
@@ -57,14 +61,31 @@ export const searchTransferMarket = function (buyerSetting) {
         "warning"
       );
     }
+    const rawPlayersList = buyerSetting["idAddIgnorePlayersList"];
+    const normalizedPlayersList = Array.isArray(rawPlayersList)
+      ? rawPlayersList
+      : rawPlayersList instanceof Set
+      ? Array.from(rawPlayersList)
+      : rawPlayersList instanceof Map
+      ? Array.from(rawPlayersList.values())
+      : rawPlayersList && typeof rawPlayersList === "object"
+      ? Object.values(rawPlayersList)
+      : [];
     const playersList = new Set(
-      (buyerSetting["idAddIgnorePlayersList"] || []).map(({ id }) => id)
+      normalizedPlayersList
+        .map((entry) => (entry && typeof entry === "object" ? entry.id : entry))
+        .filter(Boolean)
     );
     const dataSource = getDataSource();
     const criteriaSource =
       (this && this.viewmodel && this.viewmodel.searchCriteria) ||
       getValue("lastSearchCriteria") ||
       {};
+    const criteriaRatingRange = extractRatingRange(criteriaSource);
+    const effectiveMinRating =
+      criteriaRatingRange.min || buyerSetting["idAbMinRating"];
+    const effectiveMaxRating =
+      criteriaRatingRange.max || buyerSetting["idAbMaxRating"];
     let bidPrice = toNumber(buyerSetting["idAbMaxBid"]);
     let userBuyNowPrice = toNumber(buyerSetting["idAbBuyPrice"]);
     const useFutBinPrice = !!buyerSetting["idBuyFutBinPrice"];
@@ -168,7 +189,25 @@ export const searchTransferMarket = function (buyerSetting) {
                 : auction.expires;
             let type = player.type;
             let { id } = player._metaData || {};
-            let playerRating = parseInt(player.rating);
+            let playerRating = parseInt(player && player.rating, 10);
+            if (!Number.isFinite(playerRating)) {
+              try {
+                playerRating =
+                  player && typeof player.getRating === "function"
+                    ? parseInt(player.getRating(), 10)
+                    : NaN;
+              } catch (e) {}
+            }
+            if (!Number.isFinite(playerRating)) {
+              const staticData = (player && player._staticData) || {};
+              playerRating = parseInt(
+                staticData.rating ||
+                  staticData.overallRating ||
+                  staticData.overall ||
+                  staticData.ovr,
+                10
+              );
+            }
 
             if (useFutBinPrice && type === "player") {
               const existingValue = getValue(
@@ -208,8 +247,8 @@ export const searchTransferMarket = function (buyerSetting) {
               : currentBid;
 
             let usersellPrice = toNumber(buyerSetting["idAbSellPrice"]) || null;
-            let minRating = buyerSetting["idAbMinRating"];
-            let maxRating = buyerSetting["idAbMaxRating"];
+            let minRating = effectiveMinRating;
+            let maxRating = effectiveMaxRating;
             let playerName =
               (player._staticData && player._staticData.name) ||
               "Joueur";
@@ -348,6 +387,13 @@ export const searchTransferMarket = function (buyerSetting) {
         "error"
       );
     }
+
+    writeToLog(
+      `評分篩選：最低 ${effectiveMinRating || "-"} / 最高 ${
+        effectiveMaxRating || "-"
+      }${criteriaRatingRange.min || criteriaRatingRange.max ? "（EA搜尋範圍）" : "（市場設定）"}`,
+      idProgressAutobuyer
+    );
 
     writeToLog(
       `Recherche marché${
